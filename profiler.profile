@@ -7,7 +7,15 @@
  *   Magic to make install profiles easy.
  */
 
-profiler_load_distribution();
+/**
+ * Implementation of hook_profile_details().
+ */
+function profiler_profile_details() {
+  return array(
+    'name' => 'Profiler',
+    'description' => 'Magically Delicious.',
+  );
+}
 
 /**
  * Implementation of hook_profile_modules().
@@ -22,6 +30,72 @@ function profiler_profile_modules() {
   }
 
   return $modules;
+}
+
+/**
+ * Implementation of hook_form_install_select_profile_form_alter() on behalf of System 
+ * module.
+ */
+function system_form_install_select_profile_form_alter(&$form, $form_state) {
+  profiler_load_api();
+
+  // Hide this profile as a selection.
+  $form['profile']['Profiler']['#access'] = FALSE;
+  $submit = $form['submit'];
+  unset($form['submit']);
+
+  foreach (element_children($form['profile']) as $key) {
+    $item = &$form['profile'][$key];
+    $item['#value'] = NULL;
+    $item['#parents'] = array('profiler');
+    $existing[] = $item['#return_value'];
+  }
+
+  foreach (profiler_load_includes() as $name => $profile) {
+    if (!in_array($name, $existing)) {
+      $form['profiler'][$name] = array(
+        '#type' => 'radio',
+        '#return_value'=> $name,
+        '#title' => $profile['name'],
+        '#parents' => array('profiler'),
+      );
+    }
+  }
+
+  $form['submit'] = $submit;
+  $form['#validate'][] = 'profiler_install_select_profile_form_validate';
+}
+
+/**
+ * Submit handler for the install_select_profile_form. This is what handles 
+ * redirecting to the appropriate install page.
+ */
+function profiler_install_select_profile_form_validate($form, &$form_state) {
+  $profile = $form_state['values']['profiler'];
+  if ($form_state['values']['profiler']) {
+    if (isset($form['profiler'][$profile])) {
+      install_goto("install.php?profile=profiler&profiler=$profile");
+    }
+    else {
+      install_goto("install.php?profile=$profile");
+    }
+  }
+  else {
+    install_goto("install.php");
+  }
+}
+
+/**
+ * Loads all includes for Profiler install profile.
+ */
+function profiler_load_api() {
+  static $included = FALSE;
+
+  if (!$included) {
+    $path = dirname(__FILE__);
+    include_once($path .'/profiler.inc');
+    $included = TRUE;
+  }
 }
 
 /**
@@ -193,21 +267,6 @@ function profiler_install_distribution() {
       }
     }
   }
-}
-
-/**
- * Load the distribution
- */
-function profiler_load_distribution() {
-  global $distribution;
-
-  $path = dirname(__FILE__);
-  @include_once($path .'/distro_name.inc');
-  $distro_name = isset($distro_name) ? $distro_name : 'basic';
-
-  $distribution = profiler_load_distribution_file($distro_name);
-
-  $distribution['distro_name'] = $distro_name;
 }
 
 /**

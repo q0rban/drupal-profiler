@@ -2,6 +2,115 @@
 // $Id$
 
 /**
+ * @see hook_profile_task_list().
+ */
+function profiler_profile_task_list() {
+  $tasks = array(
+    'profiler-features' => st('Install Features'),
+    'profiler-install' => st('Configuration'),
+  );
+
+  return $tasks;
+}
+
+/**
+ * @see hook_profile_tasks().
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
+ */
+function profiler_profile_tasks(&$task, $url, $profile_name) {  
+  // Just in case some of the future tasks adds some output
+  $output = '';
+
+  // Install some more modules and maybe localization helpers too
+  if ($task == 'profile') {
+    $modules = profiler_contrib_modules($profile_name);
+
+    // Ensure the features module is here if there are features in the config.
+    if (!in_array('features', $modules) && profiler_features($profile_name)) {
+      $modules[] = 'features';
+    }
+
+    $files = module_rebuild_cache();
+    $operations = array();
+    foreach ($modules as $module) {
+      $operations[] = array('_install_module_batch', array($module, $files[$module]->info['name']));
+    }
+    $batch = array(
+      'operations' => $operations,
+      'finished' => 'profiler_profile_batch_finished',
+      'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
+      'error_message' => st('The installation has encountered an error.'),
+    );
+    // Start a batch, switch to 'profile-install-batch' task. We need to
+    // set the variable here, because batch_process() redirects.
+    variable_set('install_task', 'profile-install-batch');
+    batch_set($batch);
+    batch_process($url, $url);
+  }
+
+  // Install all features.
+  if ($task == 'profiler-features') {
+    if ($features = profiler_features($profile_name)) {
+      $files = module_rebuild_cache();
+      $operations = array();
+      foreach ($features as $feature) {
+        $operations[] = array('_install_module_batch', array($feature, $files[$feature]->info['name']));
+      }
+      $batch = array(
+        'operations' => $operations,
+        'finished' => 'profiler_features_batch_finished',
+        'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
+        'error_message' => st('The installation has encountered an error.'),
+      );
+      // Start a batch, switch to 'profile-install-batch' task. We need to
+      // set the variable here, because batch_process() redirects.
+      variable_set('install_task', 'profile-install-batch');
+      batch_set($batch);
+      batch_process($url, $url);
+    else {
+      profiler_features_batch_finished(TRUE, array());
+    }
+  }
+
+  // Installs the actual profile.
+  // @todo Review all the cache/rebuild options at the end, some of them may not be needed
+  if ($task == 'profiler-install') {
+    $config = profiler_load_config($profile_name);
+    // Remove default input filter formats
+    $result = db_query("SELECT * FROM {filter_formats} WHERE name IN ('%s', '%s')", 'Filtered HTML', 'Full HTML');
+    while ($row = db_fetch_object($result)) {
+      db_query("DELETE FROM {filter_formats} WHERE format = %d", $row->format);
+      db_query("DELETE FROM {filters} WHERE format = %d", $row->format);
+    }
+
+    // Set time zone
+    variable_set('date_default_timezone_name', 'US/Eastern');
+
+    // Calculate time zone offset from time zone name and set the default timezone offset accordingly.
+    // You dont need to change the next two lines if you change the default time zone above.
+    $date = date_make_date('now', variable_get('date_default_timezone_name', 'US/Eastern'));
+    variable_set('date_default_timezone', date_offset_get($date));
+
+    // Rebuild key tables/caches
+    menu_rebuild();
+    module_rebuild_cache(); // Detects the newly added bootstrap modules
+    node_access_rebuild();
+    drupal_get_schema('system', TRUE); // Clear schema DB cache
+    drupal_flush_all_caches();
+    db_query("UPDATE {blocks} SET status = 0, region = ''"); // disable all DB blocks
+
+    profiler_install($profile_name);
+
+    // Get out of this batch and let the installer continue
+    $task = 'profile-finished';
+  }
+
+  return $output;
+}
+
+/**
  * @see hook_profile_modules().
  *
  * @param $profile_name
@@ -64,112 +173,6 @@ function profiler_features($profile_name) {
   }
 
   return array_unique($features);
-}
-
-/**
- * @see hook_profile_task_list().
- */
-function profiler_profile_task_list() {
-  $tasks = array(
-    'profiler-features' => st('Install Features'),
-    'profiler-install' => st('Configuration'),
-  );
-
-  return $tasks;
-}
-
-/**
- * @see hook_profile_tasks().
- *
- * @param $profile_name
- *   The machine name of the Install profile.
- */
-function profiler_profile_tasks(&$task, $url, $profile_name) {  
-  // Just in case some of the future tasks adds some output
-  $output = '';
-
-  // Install some more modules and maybe localization helpers too
-  if ($task == 'profile') {
-    $modules = profiler_contrib_modules($profile_name);
-
-    // Ensure the features module is here if there are features in the config.
-    if (!in_array('features', $modules) && profiler_features($profile_name)) {
-      $modules[] = 'features';
-    }
-
-    $files = module_rebuild_cache();
-    $operations = array();
-    foreach ($modules as $module) {
-      $operations[] = array('_install_module_batch', array($module, $files[$module]->info['name']));
-    }
-    $batch = array(
-      'operations' => $operations,
-      'finished' => 'profiler_profile_batch_finished',
-      'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
-      'error_message' => st('The installation has encountered an error.'),
-    );
-    // Start a batch, switch to 'profile-install-batch' task. We need to
-    // set the variable here, because batch_process() redirects.
-    variable_set('install_task', 'profile-install-batch');
-    batch_set($batch);
-    batch_process($url, $url);
-  }
-
-  // Install all features.
-  if ($task == 'profiler-features') {
-    // Set the variable here, because batch_process() redirects.
-    variable_set('install_task', 'profile-install-batch');
-
-    if ($features = profiler_features($profile_name)) {
-      $files = module_rebuild_cache();
-      $operations = array();
-      foreach ($features as $feature) {
-        $operations[] = array('_install_module_batch', array($feature, $files[$feature]->info['name']));
-      }
-      $batch = array(
-        'operations' => $operations,
-        'finished' => 'profiler_profile_batch_finished',
-        'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
-        'error_message' => st('The installation has encountered an error.'),
-      );
-      batch_set($batch);
-      batch_process($url, $url);
-    }
-  }
-
-  // Installs the actual profile.
-  // @todo Review all the cache/rebuild options at the end, some of them may not be needed
-  if ($task == 'profiler-install') {
-    $config = profiler_load_config($profile_name);
-    // Remove default input filter formats
-    $result = db_query("SELECT * FROM {filter_formats} WHERE name IN ('%s', '%s')", 'Filtered HTML', 'Full HTML');
-    while ($row = db_fetch_object($result)) {
-      db_query("DELETE FROM {filter_formats} WHERE format = %d", $row->format);
-      db_query("DELETE FROM {filters} WHERE format = %d", $row->format);
-    }
-
-    // Set time zone
-    variable_set('date_default_timezone_name', 'US/Eastern');
-
-    // Calculate time zone offset from time zone name and set the default timezone offset accordingly.
-    // You dont need to change the next two lines if you change the default time zone above.
-    $date = date_make_date('now', variable_get('date_default_timezone_name', 'US/Eastern'));
-    variable_set('date_default_timezone', date_offset_get($date));
-
-    profiler_install($profile_name);
-
-    // Rebuild key tables/caches
-    menu_rebuild();
-    module_rebuild_cache(); // Detects the newly added bootstrap modules
-    node_access_rebuild();
-    drupal_get_schema('system', TRUE); // Clear schema DB cache
-    drupal_flush_all_caches();
-    db_query("UPDATE {blocks} SET status = 0, region = ''"); // disable all DB blocks
-
-    // Get out of this batch and let the installer continue
-    $task = 'profile-finished';
-  }
-  return $output;
 }
 
 /**

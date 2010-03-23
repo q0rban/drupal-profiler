@@ -26,8 +26,14 @@ function profiler_profile_task_list($profile_name) {
  *
  * @param $profile_name
  *   The machine name of the Install profile.
+ * @param $task
+ *   The current $task of the install system. When hook_profile_tasks() is first 
+ *   called, this is 'profile'.
+ * @param $url
+ *   Complete URL to be used for a link or form action on a custom page, if 
+ *   providing any, to allow the user to proceed with the installation.
  */
-function profiler_profile_tasks(&$task, $url, $profile_name) {
+function profiler_profile_tasks($profile_name, &$task, $url) {
   // Just in case some of the future tasks adds some output
   $output = '';
 

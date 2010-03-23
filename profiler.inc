@@ -3,12 +3,20 @@
 
 /**
  * @see hook_profile_task_list().
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function profiler_profile_task_list() {
-  $tasks = array(
-    'profiler-features' => st('Install Features'),
-    'profiler-install' => st('Configuration'),
-  );
+function profiler_profile_task_list($profile_name) {
+  $tasks = array();
+
+  $tasks['profiler-modules'] = st('Install Modules');
+
+  if ($features = profiler_features($profile_name)) {
+    $tasks['profiler-features'] = st('Install Features');
+  }
+
+  $tasks['profiler-install'] = st('Additional Configuration');
 
   return $tasks;
 }
@@ -23,8 +31,13 @@ function profiler_profile_tasks(&$task, $url, $profile_name) {
   // Just in case some of the future tasks adds some output
   $output = '';
 
-  // Install some more modules and maybe localization helpers too
   if ($task == 'profile') {
+    // Move along, nothing to do here.
+    $task = 'profile-modules';
+  }
+
+  // Install some contrib modules.
+  if ($task == 'profile-modules') {
     $modules = profiler_contrib_modules($profile_name);
 
     // Ensure the features module is here if there are features in the config.
@@ -39,7 +52,7 @@ function profiler_profile_tasks(&$task, $url, $profile_name) {
     }
     $batch = array(
       'operations' => $operations,
-      'finished' => 'profiler_profile_batch_finished',
+      'finished' => 'profiler_modules_batch_finished',
       'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
       'error_message' => st('The installation has encountered an error.'),
     );
@@ -69,6 +82,7 @@ function profiler_profile_tasks(&$task, $url, $profile_name) {
       variable_set('install_task', 'profile-install-batch');
       batch_set($batch);
       batch_process($url, $url);
+    }
     else {
       profiler_features_batch_finished(TRUE, array());
     }
@@ -125,6 +139,9 @@ function profiler_profile_modules($profile_name) {
     $modules = array_diff($modules, $config['modules-unset']);
   }
 
+  // We can't do anything without the Install Profile API module!
+  $modules[] = 'install_profile_api';
+
   return $modules;
 }
 
@@ -180,7 +197,7 @@ function profiler_features($profile_name) {
  *
  * Advance installer task to features install.
  */
-function profiler_profile_batch_finished($success, $results) {
+function profiler_modules_batch_finished($success, $results) {
   variable_set('install_task', 'profiler-features');
 }
 

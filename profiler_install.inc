@@ -211,14 +211,23 @@ function profiler_install_menu_items($menu_items) {
       $installed[] = $item['link_path'];
     }
   }
+  menu_rebuild();
 }
 
 function profiler_install_blocks($blocks, $config) {
   install_include(array('block'));
 
+  // Rehash the blocks. We store the global theme key so we can rehash the 
+  // blocks with $key as the theme key.
+  $theme = isset($config['theme']) ? $config['theme'] : '';
+  global $theme_key;
+  $orig_key = $theme_key;
+  $theme_key = $theme;
+  _block_rehash();
+  $theme_key = $orig_key;
+
   foreach($blocks as $block) {
     if (isset($block['module'])) {
-      $theme = isset($config['theme']) ? $config['theme'] : '';
       $theme = isset($block['theme']) ? $block['theme'] : $theme;
 
       // Check to see if this is a custom block.
@@ -252,14 +261,6 @@ function profiler_install_theme($key) {
   list_themes(TRUE);
   menu_rebuild();
   drupal_rebuild_theme_registry();
-
-  // Now rehash the blocks. We store the current theme key so we can rehash the 
-  // blocks with $key as the theme key.
-  global $theme_key;
-  $orig_key = $theme_key;
-  $theme_key = $key;
-  _block_rehash();
-  $theme_key = $orig_key;
 }
 
 function _profiler_format_set_fid(&$format) {

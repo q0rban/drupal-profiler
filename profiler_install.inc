@@ -26,19 +26,37 @@ function profiler_install_users($users) {
         user_save($account, $array);
       }
       else {
-        // For some reason db_last_insert_id() doesn't get the uid of the newly created user,
-        // so we need to separate out roles first, create the account, then save again to 
-        // properly assign roles to this user.
+        // For some reason db_last_insert_id() doesn't get the uid of the newly created 
+        // user, so we need to separate out roles first, create the account, then save 
+        // again to properly assign roles to this user.
         $roles = $array['roles'];
-        unset($array['roles']);
+
+        // Passwords should be md5 hashed values, so we need to separate the pass field 
+        // out first.
+        $pass = $array['pass'];
+
+        unset($array['roles'], $array['pass']);
         user_save(new stdClass(), $array);
-        if ($roles && $array['name']) {
-          $account = user_load(array('name' => $array['name']));
-          user_save($account, array('roles' => $roles));
-        }
+
+        $account = user_load(array('name' => $array['name']));
+        _profiler_install_users_roles($account, $roles);
+        db_query("UPDATE {users} SET pass = '%s' WHERE name = '%s'", $pass, $array['name']);
       }
     }
   }
+}
+
+function _profiler_install_users_roles($account, $roles) {
+  $formatted = array();
+  $roles = explode(',', $roles);
+
+  foreach ($roles as $name) {
+    if ($rid = db_result(db_query("SELECT rid FROM {role} WHERE name = '%s'", trim($name)))) {
+      $formatted[$rid] = TRUE;
+    }
+  }
+
+  user_save($account, array('roles' => $formatted));
 }
 
 function profiler_install_input_formats($formats) {
@@ -57,8 +75,13 @@ function profiler_install_input_formats($formats) {
       }
   
       if ($data['roles']) {
-        $roles = is_array($data['roles']) ? $data['roles'] : explode(',', $data['roles']);
-        if (is_array($roles)) {
+        $roles = array();
+        foreach (explode(',', $data['roles']) as $name) {
+          if ($rid = db_result(db_query("SELECT rid FROM {role} WHERE name = '%s'", trim($name)))) {
+            $roles[] = $rid;
+          }
+        }
+        if (!empty($roles)) {
           install_format_set_roles($roles, $format_id);
         }
       }
@@ -230,7 +253,8 @@ function profiler_install_theme($key) {
   menu_rebuild();
   drupal_rebuild_theme_registry();
 
-  // Now rehash the blocks.
+  // Now rehash the blocks. We store the current theme key so we can rehash the 
+  // blocks with $key as the theme key.
   global $theme_key;
   $orig_key = $theme_key;
   $theme_key = $key;

@@ -22,6 +22,10 @@ function profiler_install_roles($roles) {
 function profiler_install_users($users) {
   foreach($users as $array) {
     if ($array) {
+      // Skip user 1, we'll do that later.
+      if ($array['uid'] == 1) {
+        continue;
+      }
       if ($array['uid'] && ($account = user_load($array['uid']))) {
         user_save($account, $array);
       }

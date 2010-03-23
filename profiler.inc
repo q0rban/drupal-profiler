@@ -225,10 +225,28 @@ function profiler_form_alter($profile_name, &$form, $form_state, $form_id) {
 
   // If site_name and site_mail are in the config, we can possibly bypass a step
   // during the installation.
-  if ($form_id == 'install_configure' && isset($config['variables']['site_name']) && isset($config['variables']['site_mail'])) {
+  if ($form_id == 'install_configure' && 
+    isset($config['variables']['site_name']) && 
+    isset($config['variables']['site_mail']) && 
+    profiler_config_load_superuser($config)
+  ) {
     variable_set('site_name', $config['variables']['site_name']);
     variable_set('site_mail', $config['variables']['site_mail']);
   }
+}
+
+/**
+ * Returns user 1 for a config, if it exists.
+ */
+function profiler_config_load_superuser($config) {
+  if (isset($config['users'])) {
+    foreach ($config['users'] as $account) {
+      if ($account['uid'] == 1) {
+        return $account;
+      }
+    }
+  }
+  return FALSE;
 }
 
 /**
@@ -241,6 +259,7 @@ function profiler_install($profile_name) {
   $config = profiler_load_config($profile_name);
 
   profiler_install_config($config);
+  profiler_install_configure($config);
 }
 
 /**
@@ -347,4 +366,37 @@ function profiler_config_union_recursive($array1, $array2) {
     }
   }
   return $array1;
+}
+
+/**
+ * This function mimics a lot of the functionality of install_configure_form_submit() inside install.php
+ */
+function profiler_install_configure($config) {
+  if ($array = profiler_config_load_superuser($config)) {
+    global $user;
+
+    // We need to mimic being user 1 in order to bypass administeruserbyrole.
+    $user->uid = 1;
+
+    // Load up the current user 1.
+    $account = user_load(1);
+
+    // The password is md5, so we need to unset it and save it manually.
+    $pass = $array['pass'];
+    unset($array['pass']);
+
+    user_save($account, $array);
+    // Log in the first user.
+    user_authenticate($array);
+
+    db_query("UPDATE {users} SET pass = '%s' WHERE uid = %d", $pass, 1);
+
+    variable_set('clean_url', TRUE);
+    // The user is now logged in, but has no session ID yet, which
+    // would be required later in the request, so remember it.
+    $user->sid = session_id();
+
+    // Record when this install ran.
+    variable_set('install_time', time());
+  }
 }

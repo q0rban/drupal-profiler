@@ -7,17 +7,14 @@
  */
 
 function profiler_install_roles($roles) {
-  foreach($roles as $name => $rid) {
-    if ($rid) {
-      if ($rid > 1) {
-        db_query("DELETE FROM {role} WHERE rid = %d");
-        if ($name) {
-          db_query("INSERT INTO {role} (rid, name) VALUES (%d, '%s')", $rid, $name);
-        }
-      }
-      else {
-        db_query("INSERT INTO {role} (name) VALUES ('%s')", $name);
-      }
+  foreach($roles as $value) {
+    if (is_array($value) && $value['rid'] > 2) {
+      db_query("DELETE FROM {role} WHERE rid = %d", $value['rid']);
+      db_query("INSERT INTO {role} (rid, name) VALUES (%d, '%s')", $value['rid'], $value['name']);
+    }
+    else {
+      $value = is_array($value) ? $value['name'] : $value;
+      db_query("INSERT INTO {role} (name) VALUES ('%s')", $value);
     }
   }
 }

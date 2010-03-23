@@ -27,7 +27,7 @@ function profiler_profile_task_list($profile_name) {
  * @param $profile_name
  *   The machine name of the Install profile.
  */
-function profiler_profile_tasks(&$task, $url, $profile_name) {  
+function profiler_profile_tasks(&$task, $url, $profile_name) {
   // Just in case some of the future tasks adds some output
   $output = '';
 
@@ -85,6 +85,7 @@ function profiler_profile_tasks(&$task, $url, $profile_name) {
     }
     else {
       profiler_features_batch_finished(TRUE, array());
+      $task = 'profiler-install';
     }
   }
 
@@ -239,11 +240,6 @@ function profiler_form_alter($profile_name, &$form, $form_state, $form_id) {
 function profiler_install($profile_name) {
   $config = profiler_load_config($profile_name);
 
-  if ($theme_key && ($theme_key != 'default')) {
-    $config['theme'] = $theme_key;
-  }
-  $config['theme'] = isset($config['theme']) ? $config['theme'] : 'garland';
-
   profiler_install_config($config);
 }
 
@@ -256,7 +252,7 @@ function profiler_install_config($config) {
     foreach($config as $name => $data) {
       $fnc = 'profiler_install_'. str_replace('-', '_', $name);
       if (function_exists($fnc)) {
-        $fnc($data);
+        $fnc($data, $config);
       }
     }
   }
@@ -326,12 +322,10 @@ function profiler_profile_config_file($profile_name) {
   // Check to see if this profile implements hook_profiler_info(). 
   // hook_profiler_info() can return an array with 'path' set to the path of the 
   // file that should be used as the Profiler include.
-  $fnc = $profile_name .'_profiler_info';
-  if (function_exists($fnc)) {
-    $info = $fnc();
-  }
+  $fnc = $profile_name .'_profile_details';
+  $details = $fnc();
 
-  return isset($info['path']) ? $info['path'] : drupal_get_path('profile', $profile_name) ."/$profile_name.profiler.inc";
+  return isset($details['path']) ? $details['path'] ."/$profile_name.profiler.inc" : FALSE;
 }
 
 /**

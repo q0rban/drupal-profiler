@@ -45,7 +45,7 @@ function profiler_install_users($users) {
 }
 
 function profiler_install_input_formats($formats) {
-  install_include('filter');
+  install_include(array('filter'));
 
   foreach($formats as $name => $data) {
     if ($data) {
@@ -98,7 +98,7 @@ function profiler_install_variables($vars) {
 }
 
 function profiler_install_permissions($permissions) {
-  install_include('user');
+  install_include(array('user'));
   $perms = array();
 
   foreach ($permissions as $perm => $roles) {
@@ -116,7 +116,7 @@ function profiler_install_permissions($permissions) {
 }
 
 function profiler_install_node_types($types) {
-  install_include('node');
+  install_include(array('node'));
   foreach($types as $properties) {
     if ($properties) {
       $content_type = $properties['type'];
@@ -127,7 +127,7 @@ function profiler_install_node_types($types) {
 }
 
 function profiler_install_nodes($nodes) {
-  install_include('node');
+  install_include(array('node'));
   foreach($nodes as $nid => $properties) {
     if ($properties) {
       if (is_numeric($nid)) {
@@ -147,7 +147,7 @@ function profiler_install_nodes($nodes) {
 }
 
 function profiler_install_menus($menus) {
-  install_include('menu');
+  install_include(array('menu'));
   foreach($menus as $menu) {
     if ($menu) {
       install_menu_create_menu($menu['title'], $menu['name'], $menu['description']);
@@ -157,7 +157,7 @@ function profiler_install_menus($menus) {
 
 function profiler_install_menu_items($menu_items) {
   menu_rebuild();
-  install_include('menu');
+  install_include(array('menu'));
 
   $installed = array();
   foreach($menu_items as $item) {
@@ -193,22 +193,32 @@ function profiler_install_menu_items($menu_items) {
   }
 }
 
-function profiler_install_blocks($blocks) {
-  global $profiler;
-  install_include('block');
+function profiler_install_blocks($blocks, $config) {
+  install_include(array('block'));
 
   foreach($blocks as $block) {
-    if ($block['format']) {
-      _profiler_format_set_fid($block['format']);
-    }
-    $format = $block['format'] ? $block['format'] : NULL;
+    if (isset($block['module'])) {
+      $theme = isset($config['theme']) ? $config['theme'] : '';
+      $theme = isset($block['theme']) ? $block['theme'] : $theme;
 
-    $bid = install_create_custom_block($block['body'], $block['description'], $format);
-
-    // Now enable the block if applicable.
-    if ($profiler['theme'] && $block['region']) {
-      $block['status'] = isset($block['status']) ? $block['status'] : 1;
-      install_add_block('block', $bid, $profiler['theme'], $block['status'], $block['weight'], $block['region'], $block['visibility'], $block['pages'], $block['custom'], $block['throttle'], $block['title']);
+      // Check to see if this is a custom block.
+      if ($block['module'] == 'block') {
+        if ($block['format']) {
+          _profiler_format_set_fid($block['format']);
+        }
+        $format = $block['format'] ? $block['format'] : NULL;
+        $block['bid'] = install_create_custom_block($block['body'], $block['description'], $format);
+  
+        // Try to enable the block.
+        if ($theme && $block['region']) {
+          $block['status'] = isset($block['status']) ? $block['status'] : 1;
+          install_add_block('block', $block['bid'], $theme, $block['status'], $block['weight'], $block['region'], $block['visibility'], $block['pages'], $block['custom'], $block['throttle'], $block['title']);
+        }
+      }
+      // Otherwise, just enable the block.
+      else if ($theme && isset($block['region']) && isset($block['delta'])) {
+        install_set_block($block['module'], $block['delta'], $theme, $block['region'], $block['weight'], $block['visibility'], $block['pages'], $block['custom'], $block['throttle'], $block['title']);
+      }
     }
   }
 }
@@ -222,6 +232,13 @@ function profiler_install_theme($key) {
   list_themes(TRUE);
   menu_rebuild();
   drupal_rebuild_theme_registry();
+
+  // Now rehash the blocks.
+  global $theme_key;
+  $orig_key = $theme_key;
+  $theme_key = $key;
+  _block_rehash();
+  $theme_key = $orig_key;
 }
 
 function _profiler_format_set_fid(&$format) {

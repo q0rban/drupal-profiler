@@ -2,15 +2,18 @@
 // $Id$
 
 /**
- * Implementation of hook_profile_modules().
+ * @see hook_profile_modules().
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_profile_modules() {
-  global $distribution;
+function profiler_profile_modules($profile_name) {
+  $config = profiler_load_config($profile_name);
 
-  $modules = array_unique($distribution['modules']['core']);
+  $modules = array_unique($config['modules']['core']);
 
-  if (!empty($distribution['modules-unset'])) {
-    $modules = array_diff($modules, $distribution['modules-unset']);
+  if (!empty($config['modules-unset'])) {
+    $modules = array_diff($modules, $config['modules-unset']);
   }
 
   return $modules;
@@ -18,23 +21,28 @@ function _profiler_profile_modules() {
 
 /**
  * Returns an array list of contrib modules.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_contrib_modules() {
-  global $distribution;
+function profiler_contrib_modules($profile_name) {
+  $config = profiler_load_config($profile_name);
+
   $modules = array();
 
-  // We don't want to return any core modules.
-  unset($distribution['modules']['core']);
+  // We don't want to return any core modules here.
+  unset($config['modules']['core']);
 
   // Combine all modules just to be sure.
-  foreach($distribution['modules'] as $array) {
+  foreach($config['modules'] as $array) {
     if (is_array($array)) {
       $modules = array_merge($modules, $array);
     }
   }
 
-  if (!empty($distribution['modules-unset'])) {
-    $modules = array_diff($modules, $distribution['modules-unset']);
+  // Check to see if any modules have been unset by a Sub-Profile.
+  if (!empty($config['modules-unset'])) {
+    $modules = array_diff($modules, $config['modules-unset']);
   }
 
   return array_unique($modules);
@@ -42,39 +50,53 @@ function _profiler_contrib_modules() {
 
 /**
  * Returns an array list of features.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_features() {
-  global $distribution;
-  $features = isset($distribution['features']) ? $distribution['features'] : array();
+function profiler_features($profile_name) {
+  $config = profiler_load_config($profile_name);
 
-  if (!empty($distribution['features-unset']) && !empty($features)) {
-    $features = array_diff($features, $distribution['features-unset']);
+  $features = isset($config['features']) ? $config['features'] : array();
+
+  if (!empty($config['features-unset']) && !empty($features)) {
+    $features = array_diff($features, $config['features-unset']);
   }
 
   return array_unique($features);
 }
 
 /**
- * Implementation of hook_profile_task_list().
+ * @see hook_profile_task_list().
  */
-function _profiler_profile_task_list() {
+function profiler_profile_task_list() {
   $tasks = array(
-    'webgear-configure' => st('Configuration'),
+    'profiler-features' => st('Install Features'),
+    'profiler-install' => st('Configuration'),
   );
 
   return $tasks;
 }
 
 /**
- * Implementation of hook_profile_tasks().
+ * @see hook_profile_tasks().
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {  
+function profiler_profile_tasks(&$task, $url, $profile_name) {  
   // Just in case some of the future tasks adds some output
   $output = '';
 
   // Install some more modules and maybe localization helpers too
   if ($task == 'profile') {
-    $modules = _profiler_contrib_modules();
+    $modules = profiler_contrib_modules($profile_name);
+
+    // Ensure the features module is here if there are features in the config.
+    if (!in_array('features', $modules) && profiler_features($profile_name)) {
+      $modules[] = 'features';
+    }
+
     $files = module_rebuild_cache();
     $operations = array();
     foreach ($modules as $module) {
@@ -82,7 +104,7 @@ function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {
     }
     $batch = array(
       'operations' => $operations,
-      'finished' => '_profiler_profile_batch_finished',
+      'finished' => 'profiler_profile_batch_finished',
       'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
       'error_message' => st('The installation has encountered an error.'),
     );
@@ -93,10 +115,32 @@ function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {
     batch_process($url, $url);
   }
 
-  // Run additional configuration tasks
+  // Install all features.
+  if ($task == 'profiler-features') {
+    // Set the variable here, because batch_process() redirects.
+    variable_set('install_task', 'profile-install-batch');
+
+    if ($features = profiler_features($profile_name)) {
+      $files = module_rebuild_cache();
+      $operations = array();
+      foreach ($features as $feature) {
+        $operations[] = array('_install_module_batch', array($feature, $files[$feature]->info['name']));
+      }
+      $batch = array(
+        'operations' => $operations,
+        'finished' => 'profiler_profile_batch_finished',
+        'title' => st('Installing @drupal', array('@drupal' => drupal_install_profile_name())),
+        'error_message' => st('The installation has encountered an error.'),
+      );
+      batch_set($batch);
+      batch_process($url, $url);
+    }
+  }
+
+  // Installs the actual profile.
   // @todo Review all the cache/rebuild options at the end, some of them may not be needed
-  // @todo Review for localization, the time zone cannot be set that way either
-  if ($task == 'profiler-configure') {
+  if ($task == 'profiler-install') {
+    $config = profiler_load_config($profile_name);
     // Remove default input filter formats
     $result = db_query("SELECT * FROM {filter_formats} WHERE name IN ('%s', '%s')", 'Filtered HTML', 'Full HTML');
     while ($row = db_fetch_object($result)) {
@@ -112,6 +156,8 @@ function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {
     $date = date_make_date('now', variable_get('date_default_timezone_name', 'US/Eastern'));
     variable_set('date_default_timezone', date_offset_get($date));
 
+    profiler_install($profile_name);
+
     // Rebuild key tables/caches
     menu_rebuild();
     module_rebuild_cache(); // Detects the newly added bootstrap modules
@@ -119,8 +165,6 @@ function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {
     drupal_get_schema('system', TRUE); // Clear schema DB cache
     drupal_flush_all_caches();
     db_query("UPDATE {blocks} SET status = 0, region = ''"); // disable all DB blocks
-
-    _profiler_install($theme_key);
 
     // Get out of this batch and let the installer continue
     $task = 'profile-finished';
@@ -131,49 +175,66 @@ function _profiler_profile_tasks(&$task, $url, $theme_key = NULL) {
 /**
  * Finished callback for the modules install batch.
  *
- * Advance installer task to language import.
+ * Advance installer task to features install.
  */
-function _profiler_profile_batch_finished($success, $results) {
-  variable_set('install_task', 'profiler-configure');
+function profiler_profile_batch_finished($success, $results) {
+  variable_set('install_task', 'profiler-features');
 }
 
 /**
- * Implementation of hook_form_alter().
+ * Finished callback for the features install batch.
+ *
+ * Advance installer task to localization stuff.
+ */
+function profiler_features_batch_finished($success, $results) {
+  variable_set('install_task', 'profiler-install');
+}
+
+/**
+ * Helper to implementation of hook_form_alter() for Install profiles.
  *
  * Allows the profile to alter the site-configuration form. This is
  * called through custom invocation, so $form_state is not populated.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_form_alter(&$form, $form_state, $form_id) {
-  if ($form_id == 'install_configure') {
-    variable_set('site_name', 'Site Name');
-    variable_set('site_mail', 'changeme@email.com');
+function profiler_form_alter($profile_name, &$form, $form_state, $form_id) {
+  $config = profiler_load_config($profile_name);
+
+  // If site_name and site_mail are in the config, we can possibly bypass a step
+  // during the installation.
+  if ($form_id == 'install_configure' && isset($config['variables']['site_name']) && isset($config['variables']['site_mail'])) {
+    variable_set('site_name', $config['variables']['site_name']);
+    variable_set('site_mail', $config['variables']['site_mail']);
   }
 }
 
 /**
  * Call all the functions to install basic.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
  */
-function _profiler_install($theme_key = NULL, $distro_name = 'basic') {
-  global $distribution;
+function profiler_install($profile_name) {
+  $config = profiler_load_config($profile_name);
 
   if ($theme_key && ($theme_key != 'default')) {
-    $distribution['theme'] = $theme_key;
+    $config['theme'] = $theme_key;
   }
-  $distribution['theme'] = isset($distribution['theme']) ? $distribution['theme'] : 'garland';
+  $config['theme'] = isset($config['theme']) ? $config['theme'] : 'garland';
 
-  _profiler_install_distribution();
+  profiler_install_config($config);
 }
 
 /**
- *
+ * Calls each config installation function.
  */
-function _profiler_install_distribution() {
-  global $distribution;
-
-  if (is_array($distribution)) {
-    require_once('./profiles/includes/distribution.inc');
-    foreach($distribution as $name => $data) {
-      $fnc = 'distribution_install_'. str_replace('-', '_', $name);
+function profiler_install_config($config) {
+  if (is_array($config)) {
+    require_once('./profiles/profiler/profiler_install.inc');
+    foreach($config as $name => $data) {
+      $fnc = 'profiler_install_'. str_replace('-', '_', $name);
       if (function_exists($fnc)) {
         $fnc($data);
       }
@@ -182,52 +243,87 @@ function _profiler_install_distribution() {
 }
 
 /**
- * Load the distribution
+ * Load the config for a particular Install profile.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
+ * @param $reset
+ *   Boolean to reset the static cache of the config.
+ * @return
+ *   The Install profiles Profiler include configuration, as an array.
  */
-function _profiler_load_distribution() {
-  global $distribution;
+function profiler_load_config($profile_name, $reset = FALSE) {
+  static $config;
 
-  $path = dirname(__FILE__);
-  @include_once($path .'/distro_name.inc');
-  $distro_name = isset($distro_name) ? $distro_name : 'basic';
+  if (is_null($config) || $reset) {
+    $config = profiler_load_config_file($profile_name);
+  
+    $config['profile_name'] = $profile_name;
+  }
 
-  $distribution = _profiler_load_distribution_file($distro_name);
-
-  $distribution['distro_name'] = $distro_name;
+  return $config;
 }
 
 /**
+ * Loads a Profiler include file, recursively unioning with base profiler 
+ * includes if needed.
  *
+ * @param $profile_name
+ *   The machine name of the Install profile.
+ * @param $info
+ *   Internal use only, the Sub-Profile config array to be unioned with a 
+ *   base Profiler include.
  */
-function _profiler_load_distribution_file($distro_name, $info = array()) {
-  $distribution = array();
-  $file = "./profiles/distributions/$distro_name.info";
+function profiler_load_config_file($profile_name, $info = array()) {
+  $config = array();
 
-  if (is_file($file)) {
+  if (($file = profiler_profile_config_file($profile_name)) && is_file($file)) {
+    // Sometimes drupal_parse_info_file() isn't available, so we double check before
+    // calling it to avoid any errors.
     if (function_exists('drupal_parse_info_file')) {
-      $distribution = drupal_parse_info_file($file);
+      $config = drupal_parse_info_file($file);
     }
-    if (isset($distribution['base'])) {
-      $distribution = _profiler_load_distribution_file($distribution['base'], $distribution);
+    if (isset($config['base'])) {
+      $config = profiler_load_config_file($config['base'], $config);
     }
     if (!empty($info)) {
-      $distribution = _profiler_distribution_union_recursive($distribution, $info);
+      $config = profiler_config_union_recursive($config, $info);
     }
   }
 
-  return $distribution;
+  return $config;
 }
 
 /**
- * Helper function to union two arrays recursively
+ * Returns the path to the Profiler include for an Install profile.
+ *
+ * @param $profile_name
+ *   The machine name of the Install profile.
+ * @return
+ *   The string path to the Profiler include.
  */
-function _profiler_distribution_union_recursive($array1, $array2) {
+function profiler_profile_config_file($profile_name) {
+  // Check to see if this profile implements hook_profiler_info(). 
+  // hook_profiler_info() can return an array with 'path' set to the path of the 
+  // file that should be used as the Profiler include.
+  $fnc = $profile_name .'_profiler_info';
+  if (function_exists($fnc)) {
+    $info = $fnc();
+  }
+
+  return isset($info['path']) ? $info['path'] : drupal_get_path('profile', $profile_name) ."/$profile_name.profiler.inc";
+}
+
+/**
+ * Helper function to union two arrays recursively.
+ */
+function profiler_config_union_recursive($array1, $array2) {
   foreach ($array2 as $key => $value) {
     if (!isset($array1[$key])) {
       $array1[$key] = $value;
       continue;
     }
-    $value = is_array($value) ? _profiler_distribution_union_recursive($array1[$key], $value) : $value;
+    $value = is_array($value) ? profiler_config_union_recursive($array1[$key], $value) : $value;
 
     if (is_numeric($key)) {
       $array1[] = $value;

@@ -62,8 +62,9 @@ function _profiler_install_users_roles($account, $roles) {
 function profiler_install_input_formats($formats) {
   install_include(array('filter'));
 
-  foreach($formats as $name => $data) {
+  foreach($formats as $data) {
     if ($data) {
+      $name = $data['name'];
       $format_id = install_add_format($name);
   
       if ($data['default']) {

@@ -139,11 +139,14 @@ function profiler_profile_tasks($profile_name, &$task, $url) {
  */
 function profiler_profile_modules($profile_name) {
   $config = profiler_load_config($profile_name);
+  $modules = array();
 
-  $modules = array_unique($config['modules']['core']);
-
-  if (!empty($config['modules-unset'])) {
-    $modules = array_diff($modules, $config['modules-unset']);
+  if (isset($config['modules']['core'])) {
+    $modules = array_unique($config['modules']['core']);
+  
+    if (!empty($config['modules-unset'])) {
+      $modules = array_diff($modules, $config['modules-unset']);
+    }
   }
 
   // We can't do anything without the Install Profile API module!
@@ -167,9 +170,11 @@ function profiler_contrib_modules($profile_name) {
   unset($config['modules']['core']);
 
   // Combine all modules just to be sure.
-  foreach($config['modules'] as $array) {
-    if (is_array($array)) {
-      $modules = array_merge($modules, $array);
+  if (!empty($config['modules'])) {
+    foreach($config['modules'] as $array) {
+      if (is_array($array)) {
+        $modules = array_merge($modules, $array);
+      }
     }
   }
 
@@ -344,6 +349,8 @@ function profiler_load_config_file($profile_name, $info = array()) {
  *   The string path to the Profiler include.
  */
 function profiler_profile_config_file($profile_name) {
+  require_once "./profiles/$profile_name/$profile_name.profile";
+
   // Check to see if this profile implements hook_profiler_info(). 
   // hook_profiler_info() can return an array with 'path' set to the path of the 
   // file that should be used as the Profiler include.

@@ -1,5 +1,5 @@
 <?php
-// $Id$
+// $Id: profiler_install.inc,v 1.1 2010/03/23 23:13:38 q0rban Exp $
 
 /**
  * @file
